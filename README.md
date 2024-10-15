@@ -1,2 +1,2 @@
 # cest-cu
-Accelerate CEST MRI Through Complementary Undersampling and Multi-offset Transformer Reconstruction
+Accelerating CEST MRI Through Complementary Undersampling and Multi-offset Transformer Reconstruction
