@@ -1,0 +1,11 @@
+rate: 6     # undersampling rate
+nadj: 6     # number of adjacent images as input, if we do 'n' times undersampling, then 'n' adjacent offsets are used to fullfile k-space
+imsize: [96,96]
+hdim: 16
+niter: 6
+batch_size: 8
+epochs: 30
+lr: 0.01
+momentum: 0.9
+weight_decay: 0.0001
+plot: True

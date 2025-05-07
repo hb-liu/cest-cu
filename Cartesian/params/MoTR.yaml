@@ -1,0 +1,10 @@
+rate: 3     # undersampling rate
+nadj: 5     # number of adjacent images as input
+hdim: 16
+niter: 6
+batch_size: 8
+epochs: 30
+lr: 0.01
+momentum: 0.9
+weight_decay: 0.0001
+plot: True
