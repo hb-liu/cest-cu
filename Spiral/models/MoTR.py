@@ -75,10 +75,10 @@ class Transformer(nn.Module):
                 ])
             )
         self.convout = nn.Conv2d(hdim, odim, 1, 1, 0)
-    def forward(self, x, m0):
-        m0 = view_as_real(m0)
+    def forward(self, x, xj):
         x  = view_as_real(x)
-        x  = torch.cat([x,m0],1)
+        xj = view_as_real(xj)
+        x  = torch.cat([x,xj],dim=1)
         x  = self.convin(x)
         for (attn, ff) in self.blocks:
             x = attn(x) + x
@@ -97,13 +97,35 @@ class MoTR(nn.Module):
         imsize = tuple(modelparams['imsize'])
         self.iters = nn.ModuleList()
         for i in range(niter):
-            self.iters.append(Transformer(2*(nadj+1), hdim, 2*nadj))
+            self.iters.append(Transformer(2*(1+nadj), hdim, 2*nadj))
         self.nadj   = nadj
         self.rate   = rate
         self.imsize = imsize
         self.nufft  = tkbn.KbNufft(imsize)
         self.adj    = tkbn.KbNufftAdjoint(imsize)
         self.dcf    = None
+        self.jdcf   = None
+    @torch.no_grad()
+    def join(self, ku: Tensor, tu: Tensor) -> Tensor:
+        """
+        join adjacent frequency offsets to form fully-sampled reference images
+        Args:
+            ku: undersampled k-space, `(batch_size, nadj, traj_length, nleaves)`
+            tu: undersampling trajectory, `(nadj, ndim, traj_length, nleaves)`
+        Returns:
+            xj: reference images, `(batch_size, 1, height, width)`
+        """
+        ku, tu = ku.flatten(2), tu.flatten(2)
+        ku = rearrange(ku, 'b n l -> b 1 (n l)')
+        tu = rearrange(tu, 'n d l -> 1 d (n l)')
+        if self.jdcf == None:
+            self.jdcf = self.update_dcf(tu)
+        batchsize = ku.shape[0]
+        tu  = tu.repeat([batchsize,1,1])
+        dcf = self.jdcf.repeat([batchsize,1,1])
+        ku  = rearrange(ku, 'b n l -> (b n) 1 l')
+        xu  = self.adj(ku*dcf, tu, norm='ortho')
+        return xu
     @torch.no_grad()
     def undersampling(self, kf: Tensor, traj: Tensor) -> Tensor:
         """
@@ -130,7 +152,8 @@ class MoTR(nn.Module):
         return ku, tu
     @torch.no_grad()
     def update_dcf(self, tu: Tensor):
-        self.dcf = tkbn.calc_density_compensation_function(tu, self.imsize)
+        dcf = tkbn.calc_density_compensation_function(tu, self.imsize)
+        return dcf
     def batchwise_adj(self, ku: Tensor, tu: Tensor) -> Tensor:
         """
         for each sample in minibatch, reconstruct zero-filled image
@@ -162,23 +185,25 @@ class MoTR(nn.Module):
         k = self.nufft(x, traj, norm='ortho').squeeze(1)
         k = rearrange(k, '(b n) l -> b n l', b = batchsize)
         return k
-    def forward(self, ku: Tensor, tu: Tensor, m0: Tensor) -> Tensor:
+    def forward(self, ku: Tensor, tu: Tensor, xj: Tensor) -> Tensor:
         """
         Args:
             ku: undersampled k-space, `(batch_size, nadj, traj_length, nleaves)`
             tu: undersampling trajectory, `(nadj, ndim, traj_length, nleaves)`
-            m0: fullysampled, unsaturated image, `(batch_size, 1, height, width)`
+            xj: reference image by joining adjacent k-space, `(batch_size, 1, height, width)`
         Returns:
             x: reconstructed image, `(batch_size, nadj, height, width)`
         """
         ku, tu = ku.flatten(2), tu.flatten(2)
         if self.dcf == None:
-            self.update_dcf(tu)
+            self.dcf = self.update_dcf(tu)
         x = self.batchwise_adj(ku,tu)
-        for layer in self.iters:
-            x = x + layer(x,m0)
+        for layer in self.iters[:-1]:
+            x = x + layer(x,xj)
             # data consistency
             kd = self.batchwise_nufft(x,tu) - ku
             xd = self.batchwise_adj(kd,tu)
             x  = x - xd
+        # no data consistency at final layer, to remove aliasing artifacts
+        x = x + layer(x,xj)
         return x
