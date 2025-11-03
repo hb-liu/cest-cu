@@ -1,0 +1,16 @@
+rate: 6     # undersampling rate
+nadj: 11    # number of adjacent images as input
+hdim: 16
+niter: 6
+pretrain:
+  batch_size: 8
+  epochs: 30
+  lr: 0.01
+finetune:
+  batch_size: 2
+  epochs: 30
+  lr: 0.01
+  gamma: 0.01  # finetune weight
+momentum: 0.9
+weight_decay: 0.0001
+plot: True
